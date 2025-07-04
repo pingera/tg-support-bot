@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pingera-sb-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pingera-sb
+  template:
+    metadata:
+      labels:
+        app: pingera-sb
+    spec:
+      imagePullSecrets:
+      - name: #FIXME
+      containers:
+      - name: pingera-sb
+        image: pingera-support-bot:0.0.1 #FIXME
+        ports:
+        - containerPort: 5000
+        resources:
+          requests:
+            cpu: "0.5"
+            memory: "512Mi"
+        envFrom:
+        - secretRef:
+            name: pingera-sb-secrets

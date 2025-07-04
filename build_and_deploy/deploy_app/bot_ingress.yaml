@@ -1,0 +1,23 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pingera-sb-ingress
+  annotations:
+    cert-manager.io/issuer: "letsencrypt-production"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - #FIXME
+    secretName: sb-tls-cert
+  rules:
+  - host: #FIXME
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: pingera-sb-nginx-service
+            port:
+              number: 80

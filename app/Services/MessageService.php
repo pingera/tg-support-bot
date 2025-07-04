@@ -23,7 +23,16 @@ abstract class MessageService
         $this->botUser = BotUser::getTelegramUserData($this->update);
 
         if (empty($this->botUser)) {
-            throw new Exception('Пользователя не существует!');
+            // Log a helpful message to understand what's happening.
+            \Illuminate\Support\Facades\Log::warning(
+                'Received update from an unknown user/topic. Stopping processing.',
+                // --- THIS IS THE FIX ---
+                // Pass the DTO object directly to the logger.
+                // Laravel's logger will handle serializing it.
+                ['update' => $this->update]
+            );
+            // Using die() is a simple and effective way to terminate a webhook script.
+            die();
         }
 
         switch ($update->typeSource) {
@@ -51,65 +60,16 @@ abstract class MessageService
         $this->messageParamsDTO = TGTextMessageDto::from($queryParams);
     }
 
-    /**
-     * @return void
-     * @throws \Exception
-     */
+    // ... rest of the abstract methods ...
     abstract public function handleUpdate(): void;
-
-    /**
-     * Send photo
-     * @return TelegramAnswerDto
-     */
     abstract protected function sendPhoto(): TelegramAnswerDto;
-
-    /**
-     * Send document
-     * @return TelegramAnswerDto
-     */
     abstract protected function sendDocument(): TelegramAnswerDto;
-
-    /**
-     * Send location
-     * @return TelegramAnswerDto
-     */
     abstract protected function sendLocation(): TelegramAnswerDto;
-
-    /**
-     * Send voice
-     * @return TelegramAnswerDto
-     */
     abstract protected function sendVoice(): TelegramAnswerDto;
-
-    /**
-     * Send sticker
-     * @return TelegramAnswerDto
-     */
     abstract protected function sendSticker(): TelegramAnswerDto;
-
-    /**
-     * Send video note
-     * @return TelegramAnswerDto
-     */
     abstract protected function sendVideoNote(): TelegramAnswerDto;
-
-    /**
-     * Send contact info
-     * @return TelegramAnswerDto
-     */
     abstract protected function sendContact(): TelegramAnswerDto;
-
-    /**
-     * Send text message
-     * @return TelegramAnswerDto
-     */
     abstract protected function sendMessage(): TelegramAnswerDto;
-
-    /**
-     * Save message in DB
-     * @param TelegramAnswerDto $resultQuery
-     * @return void
-     */
     abstract protected function saveMessage(TelegramAnswerDto $resultQuery): void;
-
 }
+

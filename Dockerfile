@@ -1,42 +1,65 @@
+# --- Stage 1: Build vendor dependencies ---
+FROM composer:2 as vendor
+
+WORKDIR /app
+
+# Copy only composer files to leverage Docker cache
+COPY database/ database/
+COPY composer.json composer.json
+COPY composer.lock composer.lock
+
+# Install dependencies
+RUN composer install \
+    --ignore-platform-reqs \
+    --no-interaction \
+    --no-plugins \
+    --no-scripts \
+    --prefer-dist \
+    --no-dev \
+    --optimize-autoloader
+
+
+# --- Stage 2: Build the final application image ---
 FROM php:8.3-fpm
 
 USER root
 
-## НАСТРОЙКА СЕРВЕРА И УСТАНОВКА МОДУЛЕЙ
-## ----------------------------
+# Install system dependencies for PHP extensions
 RUN apt-get update && apt-get install -y \
     git \
-    nodejs npm \
     curl \
     zip \
     unzip \
-    libpq-dev && \
-    docker-php-ext-install pdo pdo_pgsql pgsql
+    libpq-dev \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get clean && rm -rf /var/lib/apt/lists/*
+# Install PHP extensions
+RUN docker-php-ext-install pdo pdo_pgsql pgsql
 
-# Копируем php.ini в контейнер
+# Copy custom php.ini configuration
 COPY ./docker/php/php.ini /usr/local/etc/php/conf.d/custom.ini
-
-# Установка composer
-COPY --from=composer:latest /usr/bin/composer /usr/local/bin/composer
-ENV COMPOSER_ALLOW_SUPERUSER=1
 
 WORKDIR /var/www
 
-# Копируем файлы проекта
+# Copy vendor directory from the build stage
+COPY --from=vendor /app/vendor/ /var/www/vendor/
+
+# Copy the rest of the application files
 COPY . .
 
-# Создание необходимых директорий и установка прав
-RUN mkdir -p /var/www/storage/logs \
-    /var/www/storage/framework/sessions \
-    /var/www/storage/framework/views \
-    /var/www/storage/framework/cache && \
-    chown -R www-data:www-data /var/www/storage && \
-    find /var/www/storage -type d -exec chmod 775 {} + && \
-    find /var/www/storage -type f -exec chmod 664 {} +
+# Set correct permissions for storage and bootstrap cache
+RUN chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache && \
+    chmod -R 775 /var/www/storage /var/www/bootstrap/cache
 
+# Cache Laravel configurations
+# This is a major performance boost and highly recommended for production.
+# Artisan will use the runtime environment variables when caching.
+RUN php artisan route:cache && \
+    php artisan view:cache
+
+# Switch to non-root user
 USER www-data
 
 EXPOSE 9000
+
 CMD ["php-fpm"]
