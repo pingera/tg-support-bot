@@ -13,12 +13,23 @@ spec:
         app: pingera-sb-nginx
     spec:
       imagePullSecrets:
-      - name: #FIXME
+      - name: yandex-registry-auth
+      # Evict the pod quickly when the node becomes unreachable or not-ready,
+      # instead of waiting forever (default) and getting stuck in Unknown state.
+      tolerations:
+      - key: node.kubernetes.io/not-ready
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 30
+      - key: node.kubernetes.io/unreachable
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 30
       # This Init Container runs first to copy the code
       initContainers:
       - name: copy-app-code
         # Use your existing application image which contains the code
-        image: pingera-support-bot:0.0.1 #FIXME
+        image: cr.yandex/crpaui11dg2kd5vqkq99/pingera-support-bot:0.0.9
         # This command copies the code into the shared volume
         command: ['sh', '-c', 'cp -r /var/www/. /app-code']
         envFrom:
