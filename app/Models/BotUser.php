@@ -2,18 +2,26 @@
 
 namespace App\Models;
 
-use App\Actions\Telegram\SendContactMessage;
-use App\DTOs\TelegramUpdateDto;
-use App\DTOs\VK\VkUpdateDto;
-use App\Logging\LokiLogger;
-use App\Services\TgTopicService;
+use App\Modules\External\DTOs\ExternalMessageDto;
+use App\Modules\Telegram\DTOs\TelegramUpdateDto;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Facades\Log;
+use phpDocumentor\Reflection\Exception;
 
 /**
- * @property int $topic_id
- * @property int $chat_id
- * @property string $platform
+ * @property int               $id
+ * @property int               $topic_id
+ * @property int               $chat_id
+ * @property string            $platform
+ * @property mixed             $aiCondition
+ * @property mixed             $lastMessageManager
+ * @property ExternalUser|null $externalUser
+ * @property bool              $is_banned
+ * @property bool              $is_closed
+ * @property string|null       $closed_at
  */
 class BotUser extends Model
 {
@@ -24,33 +32,60 @@ class BotUser extends Model
     protected $fillable = [
         'chat_id',
         'topic_id',
-        'platform'
+        'platform',
+        'is_banned',
+        'banned_at',
+        'is_closed',
+        'closed_at',
     ];
 
     /**
-     * Create new TG topic
-     * @return int|null
+     * @return HasOne
      */
-    public function saveNewTopic(): ?int
+    public function externalUser(): HasOne
     {
-        try {
-            $tgTopicService = new TgTopicService();
-            $dataTopic = $tgTopicService->createNewTgTopic($this);
+        return $this->hasOne(ExternalUser::class, 'id', 'chat_id');
+    }
 
-            $this->topic_id = $dataTopic->message_thread_id;
-            $this->save();
+    /**
+     * @return HasOne
+     */
+    public function aiCondition(): HasOne
+    {
+        return $this->hasOne(AiCondition::class);
+    }
 
-            (new SendContactMessage())->executeByBotUser($this);
+    /**
+     * @return HasMany
+     */
+    public function messages(): HasMany
+    {
+        return $this->hasMany(Message::class, 'id', 'bot_user_id');
+    }
 
-            return $dataTopic->message_thread_id;
-        } catch (\Exception $e) {
-            return null;
-        }
+    /**
+     * @return HasOne
+     */
+    public function lastMessage(): HasOne
+    {
+        return $this->hasOne(Message::class)->latestOfMany();
+    }
+
+    /**
+     * @return HasOne
+     */
+    public function lastMessageManager(): HasOne
+    {
+        return $this->hasOne(Message::class)->ofMany(['created_at' => 'max'], function ($q) {
+            $q->where('message_type', 'outgoing');
+        });
     }
 
     /**
      * Get platform by chat id
+     *
      * @param int $chatId
+     *
      * @return string|null
      */
     public static function getPlatformByChatId(int $chatId): ?string
@@ -61,15 +96,17 @@ class BotUser extends Model
                 ->first();
 
             return $botUser ? $botUser->platform : null;
-        } catch (\Exception $e) {
-            (new LokiLogger())->sendBasicLog($e);
+        } catch (\Throwable $e) {
+            Log::channel('loki')->error('File: ' . $e->getFile() . '; Line: ' . $e->getLine() . '; Error: ' . $e->getMessage());
             return null;
         }
     }
 
     /**
      * Get platform by topic id
-     * @param int $chatId
+     *
+     * @param int $messageThreadId
+     *
      * @return string|null
      */
     public static function getPlatformByTopicId(int $messageThreadId): ?string
@@ -80,67 +117,149 @@ class BotUser extends Model
                 ->first();
 
             return $botUser->platform ?? null;
-        } catch (\Exception $e) {
-            (new LokiLogger())->sendBasicLog($e);
+        } catch (\Throwable $e) {
+            Log::channel('loki')->error('File: ' . $e->getFile() . '; Line: ' . $e->getLine() . '; Error: ' . $e->getMessage());
             return null;
         }
     }
 
     /**
      * Geg user data
+     *
      * @param TelegramUpdateDto $update
-     * @param string $source
+     *
      * @return BotUser|null
      */
-    public static function getTelegramUserData(TelegramUpdateDto $update): ?BotUser
+    public static function getOrCreateByTelegramUpdate(TelegramUpdateDto $update): ?BotUser
     {
         try {
-            if ($update->typeSource === 'supergroup') {
-                $botUser = self::where('topic_id', $update->messageThreadId)->first();
-            } else if ($update->typeSource === 'private') {
+            if ($update->typeSource === 'supergroup' && !empty($update->messageThreadId)) {
+                $botUser = self::where('topic_id', $update->messageThreadId)
+                    ->with('externalUser')
+                    ->first();
+            } elseif ($update->typeSource === 'private') {
                 $botUser = self::firstOrCreate(
                     [
-                        'chat_id' => $update->chatId
+                        'chat_id' => $update->chatId,
                     ],
                     [
-                        'platform' => 'telegram'
+                        'platform' => 'telegram',
                     ]
                 );
-                if (empty($botUser->topic_id)) {
-                    $botUser->saveNewTopic();
-                }
             }
 
             return $botUser ?? null;
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return null;
         }
     }
 
     /**
-     * Geg VK user data
-     * @param VkUpdateDto $update
-     * @param string $source
+     * @param int|null $messageThreadId
+     *
      * @return BotUser|null
      */
-    public static function getVkUserData(VkUpdateDto $update): ?BotUser
+    public static function getByTopicId(?int $messageThreadId): ?BotUser
     {
         try {
-            $botUser = self::firstOrCreate(
-                [
-                    'chat_id' => $update->from_id
-                ],
-                [
-                    'platform' => 'vk'
-                ]
-            );
-            if (empty($botUser->topic_id)) {
-                $botUser->saveNewTopic();
+            if ($messageThreadId) {
+                return self::where('topic_id', $messageThreadId)
+                    ->with('externalUser')
+                    ->orderByDesc('id')
+                    ->first();
+            } else {
+                return null;
             }
-
-            return $botUser ?? null;
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return null;
         }
+    }
+
+    /**
+     * @param string|int $chatId
+     * @param string     $platform
+     *
+     * @return BotUser|null
+     */
+    public static function getUserByChatId(string|int $chatId, string $platform): ?BotUser
+    {
+        try {
+            return self::firstOrCreate([
+                'chat_id' => $chatId,
+            ], [
+                'platform' => $platform,
+            ]);
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
+     * @param ExternalMessageDto $updateData
+     *
+     * @return BotUser|null
+     */
+    public function getOrCreateExternalBotUser(ExternalMessageDto $updateData): ?BotUser
+    {
+        try {
+            $this->externalUser = ExternalUser::firstOrCreate([
+                'external_id' => $updateData->external_id,
+                'source' => $updateData->source,
+            ]);
+
+            if (empty($this->externalUser)) {
+                throw new Exception('External user not found!');
+            }
+
+            return BotUser::firstOrCreate([
+                'chat_id' => $this->externalUser->id,
+                'platform' => $this->externalUser->source,
+            ]);
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
+     * @param string $external_id
+     * @param string $source
+     *
+     * @return BotUser|null
+     */
+    public function getExternalBotUser(string $external_id, string $source): ?BotUser
+    {
+        try {
+            $this->externalUser = ExternalUser::where([
+                'external_id' => $external_id,
+                'source' => $source,
+            ])->first();
+
+            if (empty($this->externalUser)) {
+                throw new Exception('External user not found!');
+            }
+
+            return BotUser::where([
+                'chat_id' => $this->externalUser->id,
+                'platform' => $this->externalUser->source,
+            ])->first();
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
+     * @return bool
+     */
+    public function isBanned(): bool
+    {
+        return $this->is_banned ?? false;
+    }
+
+    /**
+     * @return bool
+     */
+    public function isClosed(): bool
+    {
+        return $this->is_closed ?? false;
     }
 }

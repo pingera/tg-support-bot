@@ -1,29 +1,20 @@
 <?php
 
-use App\Http\Controllers\TelegramBotController;
-
-use App\Http\Controllers\VkBotController;
-use App\Middleware\TelegramQuery;
-use App\Middleware\VkQuery;
-use App\TelegramBot\TelegramMethods;
+use App\Http\Controllers\FilesController;
 use Illuminate\Support\Facades\Route;
 
+// Telegram routes are registered by App\Modules\Telegram\TelegramServiceProvider
+// VK routes are registered by App\Modules\Vk\VkServiceProvider
+// External routes are registered by App\Modules\External\ExternalServiceProvider
+
 Route::group([
-    'prefix' => 'telegram',
+    'prefix' => 'files',
 ], function () {
-    Route::post('bot', [TelegramBotController::class, 'bot_query'])->middleware(TelegramQuery::class);
+    Route::get('{file_id}', [FilesController::class, 'getFileStream'])
+        ->where('file_id', '[A-Za-z0-9\-_]+')
+        ->name('stream_file');
 
-    Route::get('set_webhook', function () {
-        $queryParams = [
-            'url' => env('APP_URL') . '/api/telegram/bot',
-            'max_connections' => 40,
-            'drop_pending_updates' => true,
-            'secret_token' => env('TELEGRAM_SECRET_KEY'),
-        ];
-        $result = TelegramMethods::sendQueryTelegram('setWebhook', $queryParams);
-
-        return response()->json($result->rawData);
-    });
+    Route::post('{file_id}', [FilesController::class, 'getFileDownload'])
+        ->where('file_id', '[A-Za-z0-9\-_]+')
+        ->name('download_file');
 });
-
-Route::post('vk/bot', [VkBotController::class, 'bot_query'])->middleware(VkQuery::class);

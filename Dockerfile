@@ -22,7 +22,8 @@ RUN composer install \
 # --- Stage 2: Build the final application image ---
 FROM php:8.3-fpm
 
-USER root
+# Используем bash с pipefail для всех RUN
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Install system dependencies for PHP extensions
 RUN apt-get update && apt-get install -y \

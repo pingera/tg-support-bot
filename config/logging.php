@@ -20,6 +20,8 @@ return [
 
     'default' => env('LOG_CHANNEL', 'stack'),
 
+    'levels' => 'debug',
+
     /*
     |--------------------------------------------------------------------------
     | Deprecations Log Channel
@@ -32,7 +34,7 @@ return [
     */
 
     'deprecations' => [
-        'channel' => env('LOG_DEPRECATIONS_CHANNEL', 'null'),
+        'channel' => env('LOG_DEPRECATIONS_CHANNEL', 'single'),
         'trace' => env('LOG_DEPRECATIONS_TRACE', false),
     ],
 
@@ -61,7 +63,7 @@ return [
 
         'stack' => [
             'driver' => 'stack',
-            'channels' => env('LOG_STACK', 'single'),
+            'channels' => explode(',', env('LOG_STACK', 'single,loki')),
             'ignore_exceptions' => false,
         ],
 
@@ -96,7 +98,7 @@ return [
             'handler_with' => [
                 'host' => env('PAPERTRAIL_URL'),
                 'port' => env('PAPERTRAIL_PORT'),
-                'connectionString' => 'tls://'.env('PAPERTRAIL_URL').':'.env('PAPERTRAIL_PORT'),
+                'connectionString' => 'tls://' . env('PAPERTRAIL_URL') . ':' . env('PAPERTRAIL_PORT'),
             ],
             'processors' => [PsrLogMessageProcessor::class],
         ],
@@ -135,8 +137,12 @@ return [
         ],
 
         'loki' => [
-            'driver' => 'custom',
-            'via' => \App\Logging\LokiLogger::class,
+            'driver' => 'monolog',
+            'handler' => \App\Logging\LokiHandler::class,
+            'handler_with' => [
+                'url' => env('LOKI_URL_PUSH', 'http://loki:3100/loki/api/v1/push'),
+            ],
+            'level' => env('LOG_LEVEL', 'debug'),
         ],
     ],
 
